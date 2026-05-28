@@ -1,0 +1,598 @@
+import { useState, useEffect, useReducer } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { cn } from "@/lib/utils";
+import {
+  LayoutDashboard,
+  ShoppingCart,
+  Wrench,
+  HeadphonesIcon,
+  Users,
+  Building2,
+  ShoppingBag,
+  BarChart3,
+  Settings,
+  UserCog,
+  Shield,
+  CreditCard,
+  ChevronDown,
+  ChevronRight,
+  MapPin,
+  ClipboardList,
+  Bell,
+  CheckSquare,
+  Tags,
+  Workflow,
+  LogOut,
+  X,
+  PanelLeftClose,
+  PanelLeftOpen,
+  FileText,
+  RefreshCcw,
+} from "lucide-react";
+import { useAuth } from "@/contexts/AuthContext";
+import { useI18n } from "@/i18n/I18nProvider";
+import { useCart } from "@/contexts/CartContext";
+import { useData } from "@/contexts/DataContext";
+import { useOrganization } from "@/contexts/OrganizationContext";
+
+interface NavItem {
+  labelKey?: string;
+  label: string;
+  icon: React.ElementType;
+  path?: string;
+  children?: NavChildItem[];
+  module?: string;
+}
+
+interface NavChildItem {
+  labelKey?: string;
+  label: string;
+  path?: string;
+  children?: NavChildItem[];
+}
+
+const NAV_ITEMS: NavItem[] = [
+  { label: "Home", icon: LayoutDashboard, module: "dashboard", path: "/home" },
+  { label: "Shop", icon: Tags, module: "shop", path: "/shop" },
+  { label: "Dashboard", icon: BarChart3, module: "dashboard", path: "/dashboard" },
+  { label: "Services", icon: Wrench, module: "services", path: "/services" },
+  {
+    label: "New AMC",
+    icon: ClipboardList,
+    module: "services",
+    path: "/services/amc/new",
+  },
+  {
+    label: "Support",
+    icon: HeadphonesIcon,
+    module: "support",
+    path: "/support",
+  },
+  { label: "Clients", icon: Users, module: "clients", path: "/clients" },
+  {
+    label: "Vendors",
+    icon: Building2,
+    module: "vendors",
+    children: [
+      { label: "Vendor List", path: "/vendors" },
+      { label: "Vendor Orders", path: "/vendors/orders" },
+      { label: "Vendor Dashboard", path: "/dashboard/vendor" },
+      { label: "Vendor Categories", path: "/vendors/categories" },
+      { label: "Vendor Onboarding", path: "/vendors/onboarding" },
+    ],
+  },
+  {
+    label: "My Requests",
+    icon: ShoppingBag,
+    module: "procure",
+    children: [
+      { label: "My Orders", path: "/orders" },
+      { label: "My Services", path: "/my-services" },
+      { label: "SLA Overview", path: "/dashboard/sla" },
+    ],
+  },
+  { label: "Reports", icon: BarChart3, module: "reports", path: "/reports" },
+  {
+    label: "Transactions",
+    icon: CreditCard,
+    module: "transactions",
+    children: [
+      {
+        label: "Sales",
+        children: [
+          { label: "Quotes", path: "/sales/quotes" },
+          { label: "Sales Orders", path: "/sales/orders" },
+          { label: "Invoices", path: "/sales/invoices" },
+          { label: "Recurring Invoices", path: "/sales/recurring-invoices" },
+          { label: "Delivery Challans", path: "/sales/delivery-challans" },
+          { label: "Payment Receipt", path: "/sales/payment-receipts" },
+          { label: "Credit Notes", path: "/sales/credit-notes" },
+          { label: "e-Way Bills", path: "/sales/e-way-bills" },
+        ],
+      },
+      {
+        label: "Purchases",
+        children: [
+          { label: "Expenses", path: "/transactions/purchase/expenses" },
+          {
+            label: "Recurring Expenses",
+            path: "/transactions/purchase/recurring-expenses",
+          },
+          {
+            label: "Purchase Orders",
+            path: "/transactions/purchase/purchase-orders",
+          },
+          { label: "Bills", path: "/transactions/purchase/bills" },
+          {
+            label: "Recurring Bills",
+            path: "/transactions/purchase/recurring-bills",
+          },
+          {
+            label: "Payments Made",
+            path: "/transactions/purchase/payments-made",
+          },
+          {
+            label: "Vendor Credits",
+            path: "/transactions/purchase/vendor-credits",
+          },
+        ],
+      },
+    ],
+  },
+  {
+    label: "User Management",
+    icon: UserCog,
+    module: "permissions",
+    children: [
+      { label: "Users", path: "/users/management" },
+      { label: "Roles", path: "/users/roles" },
+      { label: "Departments", path: "/users/departments" },
+      { label: "Invitations", path: "/users/invitations" },
+      { label: "Audit Trail", path: "/users/audit-trail" },
+    ],
+  },
+  {
+    label: "Configuration",
+    icon: Settings,
+    module: "configuration",
+    path: "/configuration",
+  },
+];
+
+// Configuration is owner-only unless explicitly delegated
+const isConfigAllowed = (
+  user: { role: string; modules?: string[] } | null,
+  hasPermission: (m: string, a: string) => boolean,
+) => {
+  if (!user) return false;
+  if (user.role === "owner") return true;
+  // Check if user has explicit configuration delegation
+  if (user.modules?.includes("configuration_delegate")) return true;
+  return false;
+};
+
+const isClientAccount = (role?: string) =>
+  String(role || "")
+    .toLowerCase()
+    .startsWith("client_");
+
+// Client role navigation items - NO Vendors
+const CLIENT_NAV_ITEMS: NavItem[] = [
+  { label: "Home", icon: LayoutDashboard, module: "dashboard", path: "/home" },
+  { label: "Shop", icon: Tags, module: "shop", path: "/shop" },
+  { label: "Services", icon: Wrench, module: "services", path: "/services" },
+  {
+    label: "My Requests",
+    icon: ClipboardList,
+    module: "orders",
+    path: "/my-requests",
+  },
+  {
+    label: "Orders",
+    icon: ShoppingBag,
+    module: "orders",
+    children: [
+      { label: "All Orders", path: "/orders" },
+      { label: "Order Statuses", path: "/orders/statuses" },
+    ],
+  },
+  {
+    label: "Clients",
+    icon: Users,
+    module: "clients",
+    children: [
+      { label: "My Organization", path: "/clients/my-organization" },
+      { label: "Team Members", path: "/clients/members" },
+      { label: "Contracts", path: "/clients/contracts" },
+    ],
+  },
+  {
+    label: "Reports",
+    icon: BarChart3,
+    module: "reports",
+    children: [
+      { label: "My Activity", path: "/reports/my-activity" },
+      { label: "Usage Reports", path: "/reports/usage" },
+    ],
+  },
+  {
+    label: "Support",
+    icon: HeadphonesIcon,
+    module: "support",
+    path: "/support",
+  },
+];
+
+interface SidebarProps {
+  onClose?: () => void;
+  isMobile?: boolean;
+  collapsed?: boolean;
+  onCollapseChange?: (collapsed: boolean) => void;
+}
+
+export default function Sidebar({
+  onClose,
+  isMobile,
+  collapsed = false,
+  onCollapseChange,
+}: SidebarProps) {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { user, logout, hasPermission } = useAuth();
+  const { totalItems } = useCart();
+  const { t, language } = useI18n();
+  const { organizations, generalSettings } = useData();
+  const { currentOrganization } = useOrganization();
+
+  // Determine which navigation items to use based on user role
+  const isClient = isClientAccount(user?.role);
+  const navItems = isClient ? CLIENT_NAV_ITEMS : NAV_ITEMS;
+
+  const getTranslatedLabel = (label: string): string => {
+    const keyMap: Record<string, string> = {
+      "Home": "nav.home",
+      "Shop": "nav.shop",
+      "Dashboard": "Dashboard",
+      "SLA Overview": "nav.slaOverview",
+      "Services": "nav.services",
+      "New AMC": "nav.newAmc",
+      "Support": "nav.support",
+      "Clients": "nav.clients",
+      "Client List": "nav.clientList",
+      "Client Addition": "nav.clientAddition",
+      "Contracts": "nav.contracts",
+      "Vendors": "nav.vendors",
+      "Vendor List": "nav.vendorList",
+      "Vendor Orders": "nav.vendorOrders",
+      "Vendor Dashboard": "nav.vendorDashboard",
+      "Vendor Categories": "nav.vendorCategories",
+      "Vendor Onboarding": "nav.vendorOnboarding",
+      "My Requests": "MY Requests",
+      "My Orders": "My Orders",
+      "My Services": "My Services",
+      "Reports": "Reports",
+      "Analytics": "nav.analytics",
+      "Audit Trail": "nav.auditTrail",
+      "Transactions": "nav.transactions",
+      "Sales": "nav.sales",
+      "Quotes": "nav.quotes",
+      "Sales Orders": "nav.salesOrders",
+      "Invoices": "nav.invoices",
+      "Recurring Invoices": "nav.recurringInvoices",
+      "Delivery Challans": "nav.deliveryChallans",
+      "Payment Receipt": "nav.paymentReceipt",
+      "Credit Notes": "nav.creditNotes",
+      "e-Way Bills": "nav.eWayBills",
+      "Purchases": "nav.purchases",
+      "Expenses": "nav.expenses",
+      "Recurring Expenses": "nav.recurringExpenses",
+      "Purchase Orders": "nav.purchaseOrders",
+      "Bills": "nav.bills",
+      "Recurring Bills": "nav.recurringBills",
+      "Payments Made": "nav.paymentsMade",
+      "Vendor Credits": "nav.vendorCredits",
+      "User Management": "nav.userManagement",
+      "Users": "nav.users",
+      "Roles": "nav.roles",
+      "Departments": "nav.departments",
+      "Invitations": "nav.invitations",
+      "Configuration": "nav.configuration"
+    };
+    const key = keyMap[label];
+    return key ? t(key) : label;
+  };
+  // Force re-render when language changes
+  const [, forceUpdate] = useReducer(x => x + 1, 0);
+  useEffect(() => { forceUpdate(); }, [language]);
+  const [expandedItems, setExpandedItems] = useState<string[]>(["Dashboard"]);
+
+  const primaryOrgId = organizations[0]?.id || "";
+  const branding = generalSettings[primaryOrgId];
+
+  const toggleExpand = (label: string) => {
+    setExpandedItems((prev) =>
+      prev.includes(label) ? prev.filter((i) => i !== label) : [...prev, label],
+    );
+  };
+
+  const isPathActive = (path: string) =>
+    location.pathname === path || location.pathname.startsWith(`${path}/`);
+
+  const isChildActive = (child: NavChildItem): boolean => {
+    if (child.path && isPathActive(child.path)) return true;
+    return (
+      child.children?.some((nestedChild) => isChildActive(nestedChild)) || false
+    );
+  };
+
+  const isParentActive = (item: NavItem) =>
+    item.children?.some((child) => isChildActive(child)) || false;
+
+  const handleNavigate = (path: string) => {
+    navigate(path);
+    if (isMobile && onClose) onClose();
+  };
+
+  return (
+    <aside
+      className={cn(
+        "h-screen bg-sidebar text-sidebar-foreground flex flex-col transition-all duration-300",
+        collapsed ? "w-16" : "w-60",
+      )}
+    >
+      <div
+        className={cn(
+          "border-b border-sidebar-border flex items-center",
+          collapsed ? "justify-center p-3" : "justify-between p-5",
+        )}
+      >
+        <div>
+          {branding?.companyLogo ? (
+            <img
+              src={branding.companyLogo}
+              alt={branding.companyName || "Company logo"}
+              className={cn(
+                "rounded object-contain object-left transition-all duration-300",
+                collapsed ? "h-8 w-8" : "h-10 w-36",
+              )}
+            />
+          ) : (
+            <div
+              className={cn(
+                "flex items-center gap-3",
+                collapsed && "justify-center",
+              )}
+            >
+              <img
+                src="/favicon.svg"
+                alt="Nido Tech logo"
+                className={cn(
+                  "rounded-xl object-contain shadow-sm ring-1 ring-white/10",
+                  collapsed ? "h-8 w-8" : "h-10 w-10",
+                )}
+              />
+              {!collapsed && (
+                <div>
+                  <h1 className="text-lg font-display font-bold text-sidebar-primary-foreground tracking-tight">
+                    {(branding?.companyName || "Nido Tech")
+                      .split(" ")
+                      .slice(0, 2)
+                      .join(" ")}
+                  </h1>
+                  <p className="text-[10px] uppercase tracking-[0.2em] text-sidebar-foreground/60 font-medium">
+                    CorpEssentials
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        {!isMobile && onCollapseChange && (
+          <button
+            onClick={() => onCollapseChange(!collapsed)}
+            className="ml-2 h-8 w-8 rounded-lg flex items-center justify-center hover:bg-sidebar-accent transition-colors active:scale-95"
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          >
+            {collapsed ? (
+              <PanelLeftOpen className="h-4 w-4 text-sidebar-foreground" />
+            ) : (
+              <PanelLeftClose className="h-4 w-4 text-sidebar-foreground" />
+            )}
+          </button>
+        )}
+        {isMobile && (
+          <button
+            onClick={onClose}
+            className="h-8 w-8 rounded-lg flex items-center justify-center hover:bg-sidebar-accent transition-colors active:scale-95"
+          >
+            <X className="h-4 w-4 text-sidebar-foreground" />
+          </button>
+        )}
+      </div>
+
+      <nav
+        className={cn(
+          "flex-1 overflow-y-auto scrollbar-thin py-2",
+          collapsed && "px-2",
+        )}
+      >
+        {navItems.map((item) => {
+          // Hide Vendors completely for client roles
+          if (item.module === "vendors" && isClient) {
+            return null;
+          }
+          if (item.module === "procure" && isClient) {
+            return null;
+          }
+          if (
+            item.module === "configuration" &&
+            !isConfigAllowed(user, hasPermission)
+          )
+            return null;
+          if (
+            item.module &&
+            item.module !== "configuration" &&
+            !hasPermission(item.module, "view") &&
+            user?.role !== "owner"
+          )
+            return null;
+          const Icon = item.icon;
+          const expanded = expandedItems.includes(item.label);
+          const parentActive = isParentActive(item);
+          const active = item.path ? isPathActive(item.path) : false;
+
+          const renderChildren = (
+            children: NavChildItem[],
+            parentKey: string,
+            depth: number,
+          ) => (
+            <div className={cn("space-y-0.5", depth === 0 ? "ml-9" : "ml-4")}>
+              {children.map((child) => {
+                const childKey = `${parentKey}-${child.label}`;
+                const childExpanded = expandedItems.includes(childKey);
+                const childActive = isChildActive(child);
+
+                return (
+                  <div key={childKey}>
+                    <button
+                      onClick={() => {
+                        if (child.children) {
+                          toggleExpand(childKey);
+                          return;
+                        }
+                        if (child.path) handleNavigate(child.path);
+                      }}
+                      className={cn(
+                        "w-full flex items-center gap-2 text-left px-4 py-2 transition-all duration-150 hover:text-sidebar-primary-foreground hover:bg-sidebar-accent",
+                        depth === 0 ? "text-xs" : "text-[11px]",
+                        childActive
+                          ? "text-sidebar-primary bg-sidebar-accent/50 font-medium"
+                          : "text-sidebar-foreground/70",
+                      )}
+                    >
+                      <span className="flex-1">{getTranslatedLabel(child.label)}</span>
+                      {child.children && (
+                        <ChevronDown
+                          className={cn(
+                            "h-3 w-3 transition-transform duration-200",
+                            !childExpanded && "-rotate-90",
+                          )}
+                        />
+                      )}
+                    </button>
+
+                    {child.children && (
+                      <div
+                        className={cn(
+                          "border-l border-sidebar-border overflow-hidden transition-all duration-200",
+                          childExpanded
+                            ? "max-h-96 opacity-100"
+                            : "max-h-0 opacity-0",
+                          "ml-2",
+                        )}
+                      >
+                        {renderChildren(child.children, childKey, depth + 1)}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          );
+
+          return (
+            <div key={item.label}>
+              <button
+                onClick={() => {
+                  if (item.children) toggleExpand(item.label);
+                  else if (item.path) handleNavigate(item.path);
+                }}
+                className={cn(
+                  "w-full flex items-center transition-all duration-200 hover:bg-sidebar-accent group",
+                  collapsed
+                    ? "justify-center gap-0 rounded-xl px-2 py-3"
+                    : "gap-3 px-5 py-2.5 text-sm",
+                  (parentActive || active) &&
+                    "bg-sidebar-accent text-sidebar-primary border-l-2 border-sidebar-primary",
+                  !parentActive && !active && "border-l-2 border-transparent",
+                )}
+              >
+                <Icon
+                  className={cn(
+                    "h-4 w-4 shrink-0 transition-transform duration-200 group-hover:scale-110",
+                    (parentActive || active) && "text-sidebar-primary",
+                  )}
+                />
+                {!collapsed && (
+                  <span className="flex-1 text-left">{getTranslatedLabel(item.label)}</span>
+                )}
+                {!collapsed && item.children && (
+                  <ChevronDown
+                    className={cn(
+                      "h-3.5 w-3.5 transition-transform duration-200",
+                      !expanded && "-rotate-90",
+                    )}
+                  />
+                )}
+              </button>
+              <div
+                className={cn(
+                  "ml-9 border-l border-sidebar-border overflow-hidden transition-all duration-200",
+                  item.children && expanded && !collapsed
+                    ? "max-h-96 opacity-100"
+                    : "max-h-0 opacity-0",
+                )}
+              >
+                {item.children && renderChildren(item.children, item.label, 0)}
+              </div>
+            </div>
+          );
+        })}
+      </nav>
+
+      <div
+        className={cn(
+          "border-t border-sidebar-border",
+          collapsed ? "p-3" : "p-4",
+        )}
+      >
+        <div
+          className={cn(
+            "mb-3 flex items-center",
+            collapsed ? "justify-center" : "gap-3",
+          )}
+        >
+          <div className="h-8 w-8 rounded-full bg-sidebar-primary flex items-center justify-center text-xs font-bold text-sidebar-primary-foreground">
+            {user?.name?.charAt(0) || "U"}
+          </div>
+          {!collapsed && (
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-medium truncate">
+                {user?.name || "User"}
+              </p>
+              <p className="text-[10px] text-sidebar-foreground/60 truncate capitalize">
+                {user?.role?.replace("_", " ")}
+              </p>
+              {isClient && currentOrganization && (
+                <p className="text-[10px] text-sidebar-primary/70 truncate font-medium">
+                  {currentOrganization.name}
+                </p>
+              )}
+            </div>
+          )}
+        </div>
+        <button
+          onClick={logout}
+          className={cn(
+            "flex items-center text-xs text-sidebar-foreground/60 hover:text-sidebar-foreground transition-colors w-full active:scale-[0.98]",
+            collapsed ? "justify-center gap-0" : "gap-2",
+          )}
+        >
+          <LogOut className="h-3.5 w-3.5" />
+          {!collapsed && t("common.signOut")}
+        </button>
+      </div>
+    </aside>
+  );
+}
